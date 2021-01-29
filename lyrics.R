@@ -3,33 +3,47 @@ require(tidyverse)
 require(tidytext)
 require(dplyr)
 
-readLines("secret.txt")
+read_lines("secret.txt")
 geniusr::genius_token(TRUE)
 geniusr::search_artist("Linkin Park")
 
-songs <- get_artist_songs_df(1581) 
-# Get all song IDs
-ids <- c(as.character(songs$song_id))
+dfSongs <- get_artist_songs_df(1581) 
 
-songs$album_id <- 0
-songs$album_name <- "NA"
-for (numI in c(1:NROW(songs))) {
-  dfTemp <- geniusr::get_song_df(songs$song_id[numI])
-  songs[numI, c("album_id", "album_name")] <- dfTemp[,c("album_id", "album_name")]
+dfSongs$album_id <- 0
+dfSongs$album_name <- "NA"
+for (numI in c(1:NROW(dfSongs))) {
+  dfTemp <- geniusr::get_song_df(dfSongs$song_id[numI])
+  dfSongs[numI, c("album_id", "album_name")] <- dfTemp[,c("album_id", "album_name")]
 }
 
-dfSongs <- songs[songs$album_name %in% c("Hybrid Theory", "Meteora", 
+dfSongs <- dfSongs[dfSongs$album_name %in% c("Hybrid Theory", "Meteora", 
                                          "Minutes to Midnight", "A Thousand Suns", 
                                          "LIVING THINGS", "The Hunting Party", 
                                          "One More Light"),]
+sAlbum <- unique(dfSongs$album_id)
+
+dfAlbum <- data.frame()
+for (numI in c(1:length(sAlbum))) {
+  dfTemp <- geniusr::get_album_tracklist_id(sAlbum[numI])
+  dfAlbum <- rbind(dfTemp, dfAlbum)
+}
+
+dfSongs <- dplyr::left_join(dfAlbum, dfSongs[,c("song_lyrics_url", "song_id")], by = "song_lyrics_url") %>% 
+  dplyr::select(song_id, song_number, song_title, album_name, song_lyrics_url) %>% 
+  dplyr::mutate(album_name = factor(album_name, levels = c("Hybrid Theory", "Meteora", 
+                                                           "Minutes to Midnight", "A Thousand Suns", 
+                                                           "LIVING THINGS", "The Hunting Party", 
+                                                           "One More Light")), 
+                song_number = factor(song_number)) %>% 
+  dplyr::arrange(album_name, song_number)
+
 
 ids <- c(as.character(dfSongs$song_id))
-# Create empty dataframe to house them
 dfLyrics <- data.frame()
 while (length(ids) > 0) {
   for (id in ids) {
     tryCatch({
-      dfLyrics <- rbind(get_lyrics_id(id), dfLyrics)
+      dfLyrics <- rbind(geniusr::get_lyrics_id(id), dfLyrics)
       successful <- unique(dfLyrics$song_id)
       ids <- ids[!ids %in% successful]
       print(paste("done - ", id))
@@ -38,60 +52,30 @@ while (length(ids) > 0) {
   }
 }
 
-allIds <- data.frame(song_id = unique(dfLyrics$song_id))
-allIds$album <- ""
-
-for (song in allIds$song_id) {
-  allIds[match(song,allIds$song_id),2] <- get_song_df(song)[12]
-  print(allIds[match(song,allIds$song_id),])
-}
-dfLyrics <- full_join(allIds, dfLyrics)
-
-head(allIds)
-allIds$album[is.na(allIds$album)] <- "Single Only"
-head(allIds)
-allLyrics2 <- full_join(dfLyrics, allIds)
-
-## Text Analysis
-allLyricsTokenised <- allLyrics2 %>%
-  #word is the new column, line the column to retrieve the information from
-  unnest_tokens(word, line)
-# Count each word - I guarantee love is top
-allLyricsTokenised %>%
-  count(word, sort = TRUE)
-
-# Remove stopwords
-tidyLyrics <- allLyricsTokenised %>%
-  anti_join(stop_words)
-# Top words again
-tidyLyrics %>%
-  count(word, sort = TRUE)
-
-topFew <- tidyLyrics %>%
-  group_by(album, word) %>%
-  mutate(n = row_number()) %>%
+dfTokens <- dfLyrics %>% 
+  dplyr::mutate(song_id = as.numeric(song_id)) %>% 
+  dplyr::left_join(dfSongs[,c("song_id", "album_name")]) %>% 
+  tidytext::unnest_tokens(word, line) %>%
+  dplyr::anti_join(stop_words) %>% 
+  dplyr::filter(word != "na") %>% 
+  dplyr::filter(word != "eh") %>% 
+  dplyr::filter(word != "ooh") %>%
+  #count(word, sort = TRUE) %>%
+  dplyr::group_by(album_name, word) %>%
+  dplyr::mutate(n = row_number()) %>%
   ungroup()
 
-# Remove extra cols
-topFew <- topFew[,c("album", "word", "n")]
-# Take only max for each word by album
-topFew <- topFew %>%
-  group_by(album, word) %>%
-  summarise(n = max(n))%>%
-  ungroup()
-
-# Subset
-topFew <- topFew %>% 
+dfTop <- dfTokens[,c("album_name", "word", "n")] %>% 
+  dplyr::group_by(album_name, word) %>%
+  dplyr::summarise(n = max(n))%>%
+  ungroup() %>% 
   group_by(word) %>%
   mutate(total = sum(n)) %>%
-  filter(total >= 40,
-         word != "ooh") %>%
+  filter(total >= 30) %>%
   ungroup()
 
+unique(dfTop$word)
 
-topFew <- topFew2[topFew2$album %in% c(
-  "Hybrid Theory", 
-)]
 
 # colours for each album
 albumCol <- c("#394887",      # PTL
@@ -105,25 +89,20 @@ names(albumCol) <- c("Hybrid Theory", "Meteora",
                      "Minutes to Midnight", "A Thousand Suns", 
                      "LIVING THINGS", "The Hunting Party", 
                      "One More Light")
-# This ensures bars are stacked in order of release date
-topFew$album <- factor(topFew$album, levels = c("Hybrid Theory", "Meteora", 
-                                                "Minutes to Midnight", "A Thousand Suns", 
-                                                "LIVING THINGS", "The Hunting Party", 
-                                                "One More Light"))
 
-wordsPlot <- ggplot(topFew) +
+wordsPlot <- ggplot(dfTop) +
   
   geom_bar(aes(x = reorder(word, total), 
                y = n,
-               fill = as.factor(album)),
+               fill = as.factor(album_name)),
            colour = "black",
            stat = "identity") +
   
   coord_flip() +
   
-  labs(title = "The Darkness' most used words",
-       subtitle = "The words that appear more than 40 times in The Darkness' catalogue",
-       caption = "Source: genius.com | by @Statnamara",
+  labs(title = "'Linkin Park' most used words",
+       subtitle = "The words that appear more than 30 times in 'Linkin Park' catalogue",
+       caption = "Source: genius.com | by @un1t_r00t",
        y = "Number of appearances",
        x = "Word",
        fill = "Album")+
