@@ -2,6 +2,7 @@ require(geniusr)
 require(tidyverse)
 require(tidytext)
 require(dplyr)
+require(vader)
 
 read_lines("secret.txt")
 geniusr::genius_token(TRUE)
@@ -77,106 +78,143 @@ dfTop <- dfTokens[,c("album_name", "word", "n")] %>%
 unique(dfTop$word)
 
 
-# colours for each album
-albumCol <- c("#394887",      # PTL
-              "#9e5a47",      # OWT
-              "#f9c784",      # Hot cakes
-              "#cf57d4",      # Last
-              "#e8b0a5",      # PINE
-              "#d18943",      # Easter
-              "#4C1A57")      # singles
-names(albumCol) <- c("Hybrid Theory", "Meteora", 
-                     "Minutes to Midnight", "A Thousand Suns", 
-                     "LIVING THINGS", "The Hunting Party", 
-                     "One More Light")
+# dominant colors - https://www.imgonline.com.ua/eng/get-dominant-colors.php
+dfCol <- data.frame(color = 
+  c("#9a867c",      # Hybrid Theory
+    "#453827",      # Meteora
+    "#d0cfcc",      # Minutes to Midnight
+    "#000000",      # A Thousand Suns
+    "#422929",      # LIVING THINGS
+    "#494647",      # The Hunting Party
+    "#a4514b"),     # One More Light
+  album_name = c("Hybrid Theory", "Meteora", 
+                 "Minutes to Midnight", "A Thousand Suns", 
+                 "LIVING THINGS", "The Hunting Party", 
+                 "One More Light"), stringsAsFactors = FALSE)
 
-wordsPlot <- ggplot(dfTop) +
-  
-  geom_bar(aes(x = reorder(word, total), 
-               y = n,
-               fill = as.factor(album_name)),
-           colour = "black",
-           stat = "identity") +
-  
-  coord_flip() +
-  
-  labs(title = "'Linkin Park' most used words",
+dfTop <- dplyr::left_join(dfTop, dfCol)
+wordsPlot <- ggplot2::ggplot(dfTop) +
+  ggplot2::geom_bar(aes(x = reorder(word, total), 
+                        y = n,
+                        fill = album_name),
+                    colour = "black",
+                    stat = "identity") +
+  ggplot2::coord_flip() +
+  ggplot2::labs(title = "'Linkin Park' most used words",
        subtitle = "The words that appear more than 30 times in 'Linkin Park' catalogue",
-       caption = "Source: genius.com | by @un1t_r00t",
+       caption = "Source: genius.com | by r/unit_root",
        y = "Number of appearances",
        x = "Word",
        fill = "Album")+
   
-  scale_fill_manual(values = albumCol) +
-  
-  theme(title = element_text(face = "italic", size = 12), 
+  ggplot2::scale_fill_manual(values = dfCol$color) +
+  ggplot2::theme(title = ggplot2::element_text(face = "italic", size = 12), 
         
-        panel.border = element_rect(colour = "black", fill=NA, size=1),
-        panel.background = element_rect(colour = "black", fill = "white"),
-        panel.grid.major.x = element_line(colour="grey90",size = 1, linetype = 4),
+        panel.border = ggplot2::element_rect(colour = "black", fill=NA, size=1),
+        panel.background = ggplot2::element_rect(colour = "black", fill = "white"),
+        panel.grid.major.x = ggplot2::element_line(colour="grey90",size = 1, linetype = 4),
         
-        axis.title = element_text(face = "italic",size = 11, colour = "black"),
-        axis.ticks.length = unit(5, units = "pt"),
+        axis.title = ggplot2::element_text(face = "italic",size = 11, colour = "black"),
+        axis.ticks.length = ggplot2::unit(5, units = "pt"),
         
         legend.background = NULL,
         legend.position = "top",
-        legend.key.size = unit(12,"pt"),
-        legend.box.spacing = unit(5,"pt"),
-        legend.text = element_text(size = 12),
+        legend.key.size = ggplot2::unit(12,"pt"),
+        legend.box.spacing = ggplot2::unit(5,"pt"),
+        legend.text = ggplot2::element_text(size = 12),
         
-        axis.text.y = element_text(size = 12))
+        axis.text.y = ggplot2::element_text(size = 12))
 wordsPlot
-ggsave(filename = "DarknessWords.png", plot = wordsPlot, width = 30, height = 24, units = "cm",
+ggplot2::ggsave(filename = "LPWords.png", plot = wordsPlot, width = 30, height = 24, units = "cm",
        type = "cairo")
 
 # Create Sentiment df
-darknessSentiments <- tidyLyrics %>%
-  inner_join(get_sentiments("bing"))%>% 
-  count(album, song_name, sentiment) %>%
-  spread(sentiment, n, fill = 0) %>%
-  mutate(sentiment = positive - negative)
-# Factor as we did above
-darknessSentiments$album <- factor(darknessSentiments$album, 
-                                   levels = c("Hybrid Theory", "Meteora", 
-                                              "Minutes to Midnight", "A Thousand Suns", 
-                                              "LIVING THINGS", "The Hunting Party", 
-                                              "One More Light"))
+dfSent <- dfTokens %>%
+  dplyr::inner_join(tidytext::get_sentiments("bing"))%>% 
+  dplyr::count(album_name, song_name, sentiment, song_id) %>%
+  tidyr::spread(sentiment, n, fill = 0) %>%
+  dplyr::mutate(sentiment = positive - negative) %>% 
+  dplyr::left_join(dfSongs[,c("song_id", "song_number")], by = "song_id") %>% 
+  dplyr::arrange(album_name, song_number)
+
 # sent plot
-sentPlot <- ggplot(darknessSentiments,
-                   aes(reorder(song_name, 
-                               sentiment), 
-                       sentiment, 
-                       fill = album)) +
+sentPlot <- ggplot2::ggplot(dfSent, ggplot2::aes(reorder(song_name, -as.numeric(song_number)), 
+                       sentiment, fill = album_name)) +
   
-  geom_col(show.legend = FALSE) +
+  ggplot2::geom_col(show.legend = FALSE) +
   
-  facet_wrap(~album, 
+  ggplot2::facet_wrap(~album_name, 
              ncol = 3, 
              scales = "free")+
   
-  scale_fill_manual(values = albumCol)+
+  ggplot2::scale_fill_manual(values = dfCol$color) +
   
-  labs(title = "Linkin Park' songs ranked by sentiment",
-       caption = "Source: genius.com | by @un1t_r00t",
+  ggplot2::labs(title = "Linkin Park' songs ranked by sentiment",
+       caption = "Source: genius.com | by r/unit_root",
        y = "Sentiment score",
        fill = "Album")+
   
-  theme(title = element_text(face = "italic", size = 12), 
+  ggplot2::theme(title = ggplot2::element_text(face = "italic", size = 12), 
         
-        panel.border = element_rect(colour = "black", fill=NA, size=1),
-        panel.background = element_rect(colour = "black", fill = "white"),
-        panel.grid.major.x = element_line(colour="grey90",size = 1, linetype = 4),
+        panel.border = ggplot2::element_rect(colour = "black", fill=NA, size=1),
+        panel.background = ggplot2::element_rect(colour = "black", fill = "white"),
+        panel.grid.major.x = ggplot2::element_line(colour="grey90",size = 1, linetype = 4),
         
-        axis.title.x = element_text(face = "italic",size = 11, colour = "black"),
-        axis.title.y = element_blank(),
-        axis.ticks.length = unit(5, units = "pt"),
+        axis.title.x = ggplot2::element_text(face = "italic",size = 11, colour = "black"),
+        axis.title.y = ggplot2::element_blank(),
+        axis.ticks.length = ggplot2::unit(5, units = "pt"),
         
         legend.background = NULL,
         legend.position = "top",
-        legend.key.size = unit(12,"pt"),
-        legend.box.spacing = unit(5,"pt")) +
+        legend.key.size = ggplot2::unit(12,"pt"),
+        legend.box.spacing = ggplot2::unit(5,"pt")) +
   
-  coord_flip()
+  ggplot2::coord_flip()
 sentPlot
-ggsave(filename = "DarknessSentiment.png", plot = sentPlot, width = 36, height = 24, units = "cm",
+ggplot2::ggsave(filename = "LPSentiment.png", plot = sentPlot, width = 36, height = 24, units = "cm",
        type = "cairo")
+
+dfVader <- vader::vader_df(dfLyrics$line)
+
+dfSent2 <- cbind(dfLyrics, dfVader[,c("compound"), drop = FALSE]) %>% 
+  dplyr::group_by(song_id) %>% 
+  dplyr::summarise(vader = mean(compound, na.rm = TRUE) * 100) %>% 
+  dplyr::mutate(song_id = as.numeric(song_id)) %>% 
+  dplyr::left_join(dfSent, ., by = "song_id")
+
+# sent plot
+sentPlot2 <- ggplot2::ggplot(dfSent2, ggplot2::aes(reorder(song_name, -as.numeric(song_number)), 
+                                                 vader, fill = album_name)) +
+  
+  ggplot2::geom_col(show.legend = FALSE) +
+  
+  ggplot2::facet_wrap(~album_name, 
+                      ncol = 3, 
+                      scales = "free")+
+  
+  ggplot2::scale_fill_manual(values = dfCol$color) +
+  
+  ggplot2::labs(title = "Linkin Park' songs ranked by VADER sentiment",
+                caption = "Source: genius.com | by r/unit_root",
+                y = "Sentiment score",
+                fill = "Album")+
+  
+  ggplot2::theme(title = ggplot2::element_text(face = "italic", size = 12), 
+                 
+                 panel.border = ggplot2::element_rect(colour = "black", fill=NA, size=1),
+                 panel.background = ggplot2::element_rect(colour = "black", fill = "white"),
+                 panel.grid.major.x = ggplot2::element_line(colour="grey90",size = 1, linetype = 4),
+                 
+                 axis.title.x = ggplot2::element_text(face = "italic",size = 11, colour = "black"),
+                 axis.title.y = ggplot2::element_blank(),
+                 axis.ticks.length = ggplot2::unit(5, units = "pt"),
+                 
+                 legend.background = NULL,
+                 legend.position = "top",
+                 legend.key.size = ggplot2::unit(12,"pt"),
+                 legend.box.spacing = ggplot2::unit(5,"pt")) +
+  
+  ggplot2::coord_flip()
+sentPlot2
+ggplot2::ggsave(filename = "LPSentiment2.png", plot = sentPlot2, width = 36, height = 24, units = "cm",
+                type = "cairo")
